@@ -11,7 +11,7 @@ The intended users are developers who want a reviewable starting point for a new
 ### Features
 
 - A planner converts the problem statement into ordered tasks with acceptance criteria.
-- For each task, a coding agent generates complete files as a project structure; reviewer and testing agents inspect those generated files and return separate reports.
+- For each task, coding, review, and test-planning agents work concurrently; a final synthesis agent integrates all results into the project structure.
 - A Streamlit UI displays the problem, task plan, generated source/configuration/tests, review feedback, and test plans. It supports individual-file and project ZIP downloads.
 - During generation, the UI shows a live agent tree with the active planner, coder, reviewer, or test planner highlighted, plus completed, waiting, or failed states for each task.
 - A CLI is available for running the workflow without the UI.
@@ -36,7 +36,7 @@ Problem statement
  Streamlit artifact browser / CLI output
 ```
 
-The planner and coding agents run in sequence. For each task, the coding agent writes the files first; the reviewer and testing agents then analyze those files concurrently. Tasks are processed one at a time to limit load on local model hardware. ADK manages the model-agent invocations, and LiteLLM connects ADK to Ollama's OpenAI-compatible chat endpoint.
+The planner runs first. Then each task starts three independent agents concurrently: coder, reviewer, and test planner. A UI setting limits how many task groups run at once (1–4) for local hardware capacity. Each coder writes an isolated proposal; reviewers and test planners work from the task requirements because they start at the same time and do not wait for the coder. After every task agent completes, a synthesis agent receives all proposals and reports, resolves overlap, and writes the final integrated project under `project/`. ADK manages the model-agent invocations, and LiteLLM connects ADK to Ollama's OpenAI-compatible chat endpoint.
 
 ## Requirements
 
@@ -157,7 +157,7 @@ Docker mode launches the UI with `make up`. In direct Python mode, activate `.ve
 streamlit run app.py
 ```
 
-Enter a problem statement with the desired behavior, constraints, and target language. Choose the model and maximum task count in the sidebar, then select **Generate project**. Choose an artifact run and task to inspect the plan, implementation files, reviewer feedback, and test plan. The implementation view can display individual files and download one file or the whole generated project as a ZIP.
+Enter a problem statement with the desired behavior, constraints, and target language. Choose the model, maximum task count, and number of parallel task groups in the sidebar, then select **Generate project**. During generation, the live agent tree highlights active agents and shows the final synthesis stage. Choose an artifact run and task to inspect the plan, independent task proposals, reviewer feedback, and test plan. The **Final project** tab shows the integrated output and can download one file or the whole project as a ZIP.
 
 ### Command Line
 
@@ -187,14 +187,18 @@ artifacts/<run-id>/
 │   ├── pyproject.toml
 │   └── src/                 # Example; files depend on the request
 ├── task-001-<task-name>/
+│   ├── proposal/            # Isolated output from this task's coder
 │   ├── generated-files.json
-│   ├── implementation.md    # List of files generated for this task
+│   ├── implementation.md    # Proposal file list
 │   ├── review.md
 │   └── test-plan.md
 └── task-002-<task-name>/...
+├── project/                 # Final synthesis output, not individual proposals
+├── final-files.json
+└── synthesis.md
 ```
 
-The `project/` directory is the integrated generated project. Task folders contain the artifacts associated with each task. Later coding tasks receive earlier generated project files as context and may update them. Generated files remain isolated under the run directory; they are not applied to the agent repository and are not automatically executed.
+The `project/` directory is produced only after the synthesis agent has reviewed all task-agent outputs. Task folders contain independent proposals and their review/test-planning artifacts. Generated files remain isolated under the run directory; they are not applied to the agent repository and are not automatically executed.
 
 ## Development and Tests
 

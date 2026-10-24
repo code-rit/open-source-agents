@@ -93,6 +93,17 @@ def task_files(task_dir: Path) -> list[str]:
     return []
 
 
+def project_files(project_dir: Path) -> list[str]:
+    manifest = project_dir.parent / "final-files.json"
+    if manifest.is_file():
+        paths = json.loads(manifest.read_text(encoding="utf-8"))
+        if isinstance(paths, list) and all(isinstance(path, str) for path in paths):
+            return paths
+    if not project_dir.is_dir():
+        return []
+    return [path.relative_to(project_dir).as_posix() for path in project_dir.rglob("*") if path.is_file()]
+
+
 def safe_project_file(project_dir: Path, relative_path: str) -> Path:
     candidate = (project_dir / relative_path).resolve()
     root = project_dir.resolve()
@@ -134,6 +145,10 @@ with st.sidebar:
         help="For example: ollama_chat/gemma3:latest",
     )
     max_tasks = st.slider("Maximum tasks", min_value=1, max_value=12, value=5)
+    max_parallel_tasks = st.slider(
+        "Tasks in parallel", min_value=1, max_value=4, value=2,
+        help="Each task starts coding, review, and test-planning agents concurrently.",
+    )
     st.caption("Generated code is saved as files but is never executed automatically.")
 
 with st.form("generate_form", clear_on_submit=False):
@@ -198,6 +213,7 @@ if submitted:
                 ARTIFACTS_DIR,
                 max_tasks,
                 progress_callback=on_progress,
+                max_parallel_tasks=max_parallel_tasks,
             )
         )
         st.session_state["selected_run"] = generated_run.name
@@ -241,8 +257,8 @@ selected_label = st.selectbox("Task", list(task_labels), key=f"task-{selected_na
 selected_task = task_labels[selected_label]
 task_dir = task_directory(run_dir, selected_task)
 
-plan_tab, implementation_tab, review_tab, test_tab = st.tabs(
-    ["Task plan", "Implementation", "Review", "Test plan"]
+plan_tab, final_tab, proposal_tab, review_tab, test_tab = st.tabs(
+    ["Task plan", "Final project", "Task proposals", "Review", "Test plan"]
 )
 
 with plan_tab:
@@ -263,15 +279,14 @@ with plan_tab:
         key=f"plan-download-{selected_name}",
     )
 
-with implementation_tab:
-    st.subheader("Generated source and project files")
-    files = task_files(task_dir)
+with final_tab:
+    st.subheader("Integrated project")
+    st.caption("Synthesized after all task agents complete.")
+    files = project_files(project_dir)
     if not files:
-        files = [path.relative_to(project_dir).as_posix() for path in project_dir.rglob("*") if path.is_file()]
-    if not files:
-        st.warning("No project files were generated for this task.")
+        st.warning("The final project has not been synthesized yet.")
     else:
-        selected_file = st.selectbox("File", files, key=f"file-{selected_name}-{selected_task['id']}")
+        selected_file = st.selectbox("Final project file", files, key=f"final-file-{selected_name}")
         try:
             file_path = safe_project_file(project_dir, selected_file)
             content = file_path.read_text(encoding="utf-8")
@@ -285,7 +300,7 @@ with implementation_tab:
                 data=content.encode("utf-8"),
                 file_name=selected_file,
                 mime="text/plain",
-                key=f"file-download-{selected_name}-{selected_task['id']}-{selected_file}",
+                key=f"final-file-download-{selected_name}-{selected_file}",
             )
         except (OSError, ValueError, UnicodeDecodeError) as exc:
             st.error(f"Unable to display generated file: {exc}")
@@ -297,6 +312,32 @@ with implementation_tab:
             mime="application/zip",
             key=f"project-download-{selected_name}",
         )
+
+with proposal_tab:
+    st.subheader("Independent task proposal")
+    proposal_dir = task_dir / "proposal"
+    proposal_paths = task_files(task_dir)
+    if not proposal_paths:
+        st.info("No implementation proposal is available for this task.")
+    else:
+        selected_proposal = st.selectbox(
+            "Proposal file",
+            proposal_paths,
+            key=f"proposal-file-{selected_name}-{selected_task['id']}",
+        )
+        try:
+            proposal_file = safe_project_file(proposal_dir, selected_proposal)
+            proposal_content = proposal_file.read_text(encoding="utf-8")
+            st.code(proposal_content, language=proposal_file.suffix.lstrip(".") or "text")
+            st.download_button(
+                "Download proposal file",
+                data=proposal_content.encode("utf-8"),
+                file_name=selected_proposal,
+                mime="text/plain",
+                key=f"proposal-download-{selected_name}-{selected_task['id']}-{selected_proposal}",
+            )
+        except (OSError, ValueError, UnicodeDecodeError) as exc:
+            st.error(f"Unable to display proposal file: {exc}")
 
 with review_tab:
     st.subheader("Reviewer feedback")

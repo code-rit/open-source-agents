@@ -39,6 +39,14 @@ class AgentTreeTests(unittest.TestCase):
         self.assertIn("Planner format recovery", rendered)
         self.assertIn('state-completed\'>DONE', rendered)
 
+    def test_shows_synthesis_as_final_stage(self):
+        rendered = render_agent_tree_html(
+            {"synthesis_agent": {"status": "running"}},
+            [{"id": "task-001", "title": "Create app"}],
+        )
+        self.assertIn("Final project synthesis", rendered)
+        self.assertIn("level-1 active", rendered)
+
 
 if __name__ == "__main__":
     unittest.main()
