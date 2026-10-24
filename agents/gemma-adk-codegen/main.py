@@ -18,6 +18,7 @@ from google.adk.models.lite_llm import LiteLlm
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai.types import Content, Part
+from json_repair import repair_json
 
 from workflow import (
     encode_untrusted,
@@ -245,11 +246,9 @@ def parse_planner_result(
     naming_context: str = "",
 ) -> dict[str, Any]:
     """Validate the planner's ready-plan or clarification-question response."""
-    candidate = response.strip()
-    fenced = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", candidate, re.DOTALL | re.IGNORECASE)
-    if fenced:
-        candidate = fenced.group(1)
-    payload = json.loads(candidate)
+    if len(response) > 32_000:
+        raise ValueError("Planner response exceeds the 32000-character limit.")
+    payload = parse_json_object(response)
     if not isinstance(payload, dict):
         raise ValueError("Planner response must be a JSON object.")
 
@@ -289,6 +288,27 @@ def parse_planner_result(
         "project_name": project_display_name(payload.get("project_name"), naming_context),
         "tasks": tasks,
     }
+
+
+def parse_json_object(response: str) -> Any:
+    """Parse a planner JSON object, tolerating common syntax-only LLM mistakes."""
+    candidate = response.strip()
+    fenced = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", candidate, re.DOTALL | re.IGNORECASE)
+    if fenced:
+        candidate = fenced.group(1)
+    try:
+        return json.loads(candidate)
+    except json.JSONDecodeError:
+        try:
+            repaired = repair_json(candidate, return_objects=True, ensure_ascii=True)
+        except Exception as exc:
+            raise ValueError(f"Planner response could not be repaired as JSON: {exc}") from exc
+        if isinstance(repaired, str):
+            try:
+                repaired = json.loads(repaired)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"Planner response is not valid JSON: {exc.msg}") from exc
+        return repaired
 
 
 async def request_plan(

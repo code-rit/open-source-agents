@@ -36,6 +36,21 @@ class PlannerCheckpointTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ValueError, "at most 5 questions"):
             parse_planner_result(response, max_tasks=5)
 
+    def test_repairs_missing_json_delimiters_before_schema_validation(self):
+        malformed = '''{"status":"clarification_required","questions":[{"id":"q1","question":"What is the shop name?" "options":["Shop A","Shop B"]}]}'''
+        parsed = parse_planner_result(malformed, max_tasks=5)
+        self.assertEqual(parsed["status"], "clarification_required")
+        self.assertEqual(parsed["questions"][0]["question"], "What is the shop name?")
+
+    def test_repairs_trailing_explanation_after_json(self):
+        malformed = '''{"status":"clarification_required","questions":[{"id":"q1","question":"Choose a platform?","options":[]}]}\nLet me know your answer.'''
+        parsed = parse_planner_result(malformed, max_tasks=5)
+        self.assertEqual(parsed["questions"][0]["id"], "q1")
+
+    def test_repaired_json_still_requires_valid_planner_schema(self):
+        with self.assertRaisesRegex(ValueError, "Clarification response must contain questions"):
+            parse_planner_result('{"status":"clarification_required",}', max_tasks=5)
+
     async def test_planner_receives_answers_in_followup_request(self):
         clarification = json.dumps(
             {
