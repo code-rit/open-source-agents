@@ -115,6 +115,59 @@ class ParallelWorkflowTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(mocked_run_agent.await_count, 2)
 
+    async def test_uses_validated_proposals_when_synthesis_and_repair_fail(self):
+        completed_tasks: set[str] = set()
+
+        async def fake_run_agent(name, instruction, prompt, progress_callback=None, task_id=None):
+            if name == "review_agent":
+                return "Review available."
+            if name == "testing_agent":
+                completed_tasks.add(task_id)
+                return "Test plan available."
+            if name == "synthesis_agent":
+                self.assertEqual(completed_tasks, {"task-001"})
+                raise RuntimeError("Gemma returned no synthesis response")
+            if name == "synthesis_repair_agent":
+                raise RuntimeError("Gemma repair returned no JSON")
+            raise AssertionError(f"Unexpected run_agent call: {name}")
+
+        progress_events = []
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            with (
+                patch.object(main, "generate_task_plan", new=AsyncMock(return_value=TASKS[:1])),
+                patch.object(
+                    main,
+                    "generate_task_files",
+                    new=AsyncMock(
+                        return_value=[
+                            {"path": "src/app.py", "content": "print('proposal')\n"},
+                            {"path": "tests/test_app.py", "content": "def test_app(): pass\n"},
+                        ]
+                    ),
+                ),
+                patch.object(main, "run_agent", new=AsyncMock(side_effect=fake_run_agent)),
+            ):
+                run_dir = await main.run_workflow(
+                    "Create app",
+                    Path(temporary_directory),
+                    max_tasks=1,
+                    progress_callback=progress_events.append,
+                    project_name="Sample App",
+                )
+
+            self.assertEqual(
+                (run_dir / "project/src/app.py").read_text(), "print('proposal')\n"
+            )
+            report = (run_dir / "synthesis.md").read_text()
+            self.assertIn("proposal_merge_fallback", report)
+            self.assertIn("Gemma returned no synthesis response", report)
+            self.assertEqual((run_dir / "final-files.json").exists(), True)
+
+        self.assertTrue(
+            any(event["agent"] == "synthesis_agent" and event["status"] == "fallback_completed"
+                for event in progress_events)
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -30,6 +30,8 @@ STATUS_LABELS = {
     "running": "ACTIVE",
     "completed": "DONE",
     "failed": "FAILED",
+    "completed_with_warning": "FALLBACK",
+    "fallback_completed": "FALLBACK",
 }
 
 

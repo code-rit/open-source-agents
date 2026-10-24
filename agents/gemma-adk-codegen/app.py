@@ -387,7 +387,16 @@ with plan_tab:
 
 with final_tab:
     st.subheader("Integrated project")
-    st.caption("Synthesized after all task agents complete.")
+    synthesis_report_path = run_dir / "synthesis.md"
+    synthesis_report = synthesis_report_path.read_text(encoding="utf-8") if synthesis_report_path.is_file() else ""
+    if "proposal_merge_fallback" in synthesis_report:
+        st.warning(
+            "The synthesis agent could not produce a valid integrated manifest. "
+            "This project is a deterministic merge of validated task proposals; "
+            "review file collisions and integration carefully."
+        )
+    else:
+        st.caption("Synthesized after all task agents complete.")
     files = project_files(project_dir)
     if not files:
         st.warning("The final project has not been synthesized yet.")

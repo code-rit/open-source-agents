@@ -199,7 +199,7 @@ artifacts/todo-list-application-20261024T093514Z-3568c3a9/
 └── synthesis.md
 ```
 
-The `project/` directory is produced only after the synthesis agent has reviewed all task-agent outputs. Task folders contain independent proposals and their review/test-planning artifacts. Generated files remain isolated under the run directory; they are not applied to the agent repository and are not automatically executed.
+The `project/` directory is produced after all task-agent outputs are available. Normally the synthesis agent integrates them. If model synthesis and its single format-repair attempt both fail, the workflow creates a deterministic merge of the validated task proposals instead and records a warning in `synthesis.md`; inspect file collisions and integration carefully because this fallback is not equivalent to model-based synthesis. Task folders contain independent proposals and their review/test-planning artifacts. Generated files remain isolated under the run directory; they are not applied to the agent repository and are not automatically executed.
 
 Older runs created before project naming was added may still appear with their original timestamp-only names.
 
@@ -250,8 +250,8 @@ The current version is a local-first prototype. The items below are known gaps a
 
 ### 6. Improve generation quality and artifact UX
 
-- **Current issue**: The planner and coder can return malformed or incomplete output. The planner gets one bounded JSON-format repair attempt, but the coder manifest is rejected if malformed, and planner output is still rejected if the repair remains invalid. The UI is designed for local use and a small number of runs; it has no authentication, collaboration, or artifact retention controls.
-- **Future task**: Improve bounded structured-output repair for planner and coder responses, add consistency checks between acceptance criteria and tests, generated-file diff views, run search/filtering, configurable retention, and authentication/authorization before any multi-user deployment.
+- **Current issue**: Planner, coder, and synthesis responses can still be malformed or incomplete. Each structured response gets one bounded format-repair attempt; if synthesis still fails, a deterministic proposal merge is used with a warning. The UI is designed for local use and a small number of runs; it has no authentication, collaboration, or artifact retention controls.
+- **Future task**: Improve bounded structured-output repair and quality checks, add consistency checks between acceptance criteria and tests, generated-file diff views, run search/filtering, configurable retention, and authentication/authorization before any multi-user deployment.
 
 These items are starting points for future issues or pull requests. A contribution should define a narrow scope, security boundary, acceptance criteria, and tests before implementation.
 
