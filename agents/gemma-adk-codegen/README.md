@@ -242,8 +242,8 @@ The current version is a local-first prototype. The items below are known gaps a
 
 ### 6. Improve generation quality and artifact UX
 
-- **Current issue**: The planner and coder can return malformed or incomplete output, and the workflow rejects invalid JSON rather than repairing or retrying it. The UI is designed for local use and a small number of runs; it has no authentication, collaboration, or artifact retention controls.
-- **Future task**: Add bounded structured-output repair/retry, consistency checks between acceptance criteria and tests, generated-file diff views, run search/filtering, configurable retention, and authentication/authorization before any multi-user deployment.
+- **Current issue**: The planner and coder can return malformed or incomplete output. The planner gets one bounded JSON-format repair attempt, but the coder manifest is rejected if malformed, and planner output is still rejected if the repair remains invalid. The UI is designed for local use and a small number of runs; it has no authentication, collaboration, or artifact retention controls.
+- **Future task**: Improve bounded structured-output repair for planner and coder responses, add consistency checks between acceptance criteria and tests, generated-file diff views, run search/filtering, configurable retention, and authentication/authorization before any multi-user deployment.
 
 These items are starting points for future issues or pull requests. A contribution should define a narrow scope, security boundary, acceptance criteria, and tests before implementation.
 
