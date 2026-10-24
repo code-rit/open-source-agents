@@ -11,6 +11,7 @@ The intended users are developers who want a reviewable starting point for a new
 ### Features
 
 - A planner converts the problem statement into ordered tasks with acceptance criteria.
+- Before task agents start, a planner checkpoint can ask targeted clarification questions, incorporate the user's answers, and present a proposed task plan for approval.
 - For each task, coding, review, and test-planning agents work concurrently; a final synthesis agent integrates all results into the project structure.
 - A Streamlit UI displays the problem, task plan, generated source/configuration/tests, review feedback, and test plans. It supports individual-file and project ZIP downloads.
 - During generation, the UI shows a live agent tree with the active planner, coder, reviewer, or test planner highlighted, plus completed, waiting, or failed states for each task.
@@ -157,7 +158,7 @@ Docker mode launches the UI with `make up`. In direct Python mode, activate `.ve
 streamlit run app.py
 ```
 
-Enter a problem statement with the desired behavior, constraints, and target language. Choose the model, maximum task count, and number of parallel task groups in the sidebar, then select **Generate project**. During generation, the live agent tree highlights active agents and shows the final synthesis stage. Choose an artifact run and task to inspect the plan, independent task proposals, reviewer feedback, and test plan. The **Final project** tab shows the integrated output and can download one file or the whole project as a ZIP.
+Enter a problem statement with the desired behavior, constraints, and target language. Choose the model, maximum task count, and number of parallel task groups in the sidebar, then select **Generate project**. The planner may pause to ask up to five focused questions; answer them and choose **Update task plan**. There are at most two clarification rounds. The planner then shows a proposed plan for human approval before any task agents run. If details remain unspecified at the limit, it is instructed to proceed with conventional assumptions. During generation, the live agent tree highlights active agents and shows the final synthesis stage. Choose an artifact run and task to inspect the plan, independent task proposals, reviewer feedback, and test plan. The **Final project** tab shows the integrated output and can download one file or the whole project as a ZIP.
 
 ### Command Line
 
@@ -202,7 +203,7 @@ The `project/` directory is produced only after the synthesis agent has reviewed
 
 ## Development and Tests
 
-The tests validate task-plan parsing and repair, prompt data boundaries, generated file manifest validation, path traversal protection, artifact writing, and agent progress rendering. They do not require Ollama or an API key:
+The tests validate planner clarification parsing and answer feedback, task-plan parsing and repair, prompt data boundaries, generated file manifest validation, path traversal protection, artifact writing, parallel execution ordering, synthesis, and agent progress rendering. They do not require Ollama or an API key:
 
 ```bash
 python -m unittest discover -s tests -v
@@ -255,7 +256,7 @@ These items are starting points for future issues or pull requests. A contributi
 ## Security, Privacy, and Limitations
 
 - With local Ollama, prompts and generated outputs are processed by the configured host model. A remote model provider receives prompts under that provider's terms. Do not submit secrets, personal data, or proprietary code unless that model host is approved to receive it.
-- The planner and coding agents have no tools. The app does not inspect an existing repository, execute commands, run generated code/tests, or apply generated files to this repository.
+- The planner, coding, reviewer, tester, and synthesis agents have no tools. The app does not inspect an existing repository, execute commands, run generated code/tests, or apply generated files to this repository.
 - Generated paths are restricted to relative paths beneath the isolated project directory. Traversal, absolute paths, `.git`/`.env` paths, duplicate/case-colliding paths, and oversized plans/files are rejected.
 - Prompt instructions and serialized JSON boundaries are defense-in-depth measures, not a guarantee against prompt injection. Model outputs can be unsafe, incorrect, incomplete, or misleading. Review generated code and agent reports before use.
 - The reviewer and test planner provide model-generated analysis, not execution-based verification. Generated test files are not run automatically.

@@ -14,7 +14,12 @@ from typing import Any
 import streamlit as st
 from dotenv import load_dotenv
 
-from main import run_workflow
+from main import (
+    MAX_CLARIFICATION_ROUNDS,
+    ClarificationRequired,
+    request_plan,
+    run_workflow,
+)
 from progress_ui import render_agent_tree_html
 from workflow import safe_slug, validate_problem
 
@@ -165,6 +170,94 @@ if submitted:
         if not model_name.strip():
             raise ValueError("Enter a model identifier in the sidebar.")
         os.environ["MODEL_NAME"] = model_name.strip()
+        st.session_state["draft_problem"] = problem_statement
+        st.session_state["clarification_history"] = []
+        st.session_state.pop("planner_questions", None)
+        st.session_state.pop("approved_tasks", None)
+        st.session_state["checkpoint_planning"] = True
+    except Exception as exc:
+        st.error(f"Generation failed: {exc}")
+
+if st.session_state.get("checkpoint_planning"):
+    st.subheader("Planner checkpoint")
+    planner_progress = st.empty()
+    planner_progress.info("Planner is checking whether the request is specific enough...")
+    try:
+        planner_result = asyncio.run(
+            request_plan(
+                st.session_state["draft_problem"],
+                max_tasks,
+                st.session_state.get("clarification_history", []),
+            )
+        )
+        st.session_state.pop("checkpoint_planning", None)
+        if planner_result["status"] == "clarification_required":
+            rounds_used = st.session_state.get("clarification_rounds", 0)
+            if rounds_used >= MAX_CLARIFICATION_ROUNDS:
+                st.warning("The planner reached its clarification limit. It will proceed using explicit assumptions.")
+                planner_result = asyncio.run(
+                    request_plan(
+                        st.session_state["draft_problem"]
+                        + "\nUse conventional defaults for unspecified details; do not ask further questions.",
+                        max_tasks,
+                        st.session_state.get("clarification_history", []),
+                        force_ready=True,
+                    )
+                )
+            else:
+                st.session_state["planner_questions"] = planner_result["questions"]
+                st.session_state["clarification_rounds"] = rounds_used + 1
+                st.rerun()
+        if planner_result["status"] == "ready":
+            st.session_state["approved_tasks"] = planner_result["tasks"]
+            st.session_state["clarification_rounds"] = 0
+    except Exception as exc:
+        st.session_state.pop("checkpoint_planning", None)
+        st.error(f"Planner could not create a usable checkpoint: {exc}")
+
+if st.session_state.get("planner_questions"):
+    questions = st.session_state["planner_questions"]
+    st.subheader("Clarify the requirements")
+    st.caption("Answer these focused questions so the task plan and generated project fit your needs.")
+    with st.form("clarification_form"):
+        answers: dict[str, str] = {}
+        for question in questions:
+            options = question.get("options", [])
+            if options:
+                answer = st.radio(
+                    question["question"],
+                    options=[*options, "Other"],
+                    key=f"answer-{st.session_state.get('clarification_rounds', 1)}-{question['id']}",
+                )
+                if answer == "Other":
+                    answer = st.text_input(
+                        "Your answer",
+                        key=f"answer-other-{st.session_state.get('clarification_rounds', 1)}-{question['id']}",
+                    )
+            else:
+                answer = st.text_input(
+                    question["question"],
+                    key=f"answer-{st.session_state.get('clarification_rounds', 1)}-{question['id']}",
+                )
+            answers[question["id"]] = answer
+        answer_submitted = st.form_submit_button("Update task plan", type="primary")
+    if answer_submitted:
+        st.session_state["clarification_history"].append(answers)
+        st.session_state["planner_questions"] = None
+        st.session_state["checkpoint_planning"] = True
+        st.rerun()
+
+if st.session_state.get("approved_tasks"):
+    approved_tasks = st.session_state["approved_tasks"]
+    st.subheader("Review the proposed task plan")
+    for index, task in enumerate(approved_tasks, start=1):
+        with st.expander(f"{index}. {task['title']}", expanded=index == 1):
+            st.write(task["description"])
+            st.markdown("**Acceptance criteria**")
+            for criterion in task["acceptance_criteria"]:
+                st.markdown(f"- {criterion}")
+    approve_col, revise_col = st.columns(2)
+    if approve_col.button("Approve plan and generate", type="primary", use_container_width=True):
         ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
         progress: dict[str, dict[str, Any]] = {}
         workflow_tasks: list[dict[str, Any]] = []
@@ -179,47 +272,42 @@ if submitted:
                 progress_state["tasks"] = json.loads(event.get("detail") or "[]")
                 progress["problem_planner"] = {"status": "completed"}
             else:
-                key = (
-                    f"{event['task_id']}:{agent_name}"
-                    if event.get("task_id")
-                    else agent_name
-                )
+                key = f"{event['task_id']}:{agent_name}" if event.get("task_id") else agent_name
                 progress[key] = event
             current_task_id = next(
-                (
-                    item.get("task_id")
-                    for item in progress.values()
-                    if item.get("status") == "running" and item.get("task_id")
-                ),
+                (item.get("task_id") for item in progress.values() if item.get("status") == "running" and item.get("task_id")),
                 None,
             )
             tree_placeholder.markdown(
-                render_agent_tree_html(
-                    progress, progress_state["tasks"], current_task_id
-                ),
+                render_agent_tree_html(progress, progress_state["tasks"], current_task_id),
                 unsafe_allow_html=True,
             )
 
-        initial_progress = {
-            "problem_planner": {"status": "running", "agent": "problem_planner"}
-        }
         tree_placeholder.markdown(
-            render_agent_tree_html(initial_progress), unsafe_allow_html=True
+            render_agent_tree_html({"problem_planner": {"status": "completed"}} , approved_tasks),
+            unsafe_allow_html=True,
         )
-        st.caption("Planning and generating artifacts. Active agents are highlighted below.")
-        generated_run = asyncio.run(
-            run_workflow(
-                problem_statement,
-                ARTIFACTS_DIR,
-                max_tasks,
-                progress_callback=on_progress,
-                max_parallel_tasks=max_parallel_tasks,
+        try:
+            generated_run = asyncio.run(
+                run_workflow(
+                    st.session_state["draft_problem"],
+                    ARTIFACTS_DIR,
+                    max_tasks,
+                    progress_callback=on_progress,
+                    max_parallel_tasks=max_parallel_tasks,
+                    planned_tasks=approved_tasks,
+                )
             )
-        )
-        st.session_state["selected_run"] = generated_run.name
-        st.success(f"Generation complete: `{generated_run.name}`")
-    except Exception as exc:
-        st.error(f"Generation failed: {exc}")
+            st.session_state["selected_run"] = generated_run.name
+            st.session_state.pop("approved_tasks", None)
+            st.session_state.pop("clarification_history", None)
+            st.success(f"Generation complete: `{generated_run.name}`")
+        except Exception as exc:
+            st.error(f"Generation failed: {exc}")
+    if revise_col.button("Revise problem statement", use_container_width=True):
+        st.session_state.pop("approved_tasks", None)
+        st.session_state["planner_questions"] = None
+        st.info("Edit the problem statement above and submit it again.")
 
 runs = list_runs()
 if not runs:

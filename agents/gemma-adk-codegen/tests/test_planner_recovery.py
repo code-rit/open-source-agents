@@ -21,7 +21,7 @@ class PlannerRecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(tasks[0]["title"], "Create app")
         self.assertEqual(mocked_run_agent.await_count, 2)
         repair_prompt = mocked_run_agent.await_args_list[1].args[2]
-        self.assertIn("Repair its formatting", repair_prompt)
+        self.assertIn("Repair the previous planner response", repair_prompt)
 
     async def test_rejects_plan_if_repair_is_still_invalid(self):
         with patch(
