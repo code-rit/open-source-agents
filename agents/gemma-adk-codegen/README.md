@@ -11,8 +11,10 @@ The intended users are developers who want a reviewable starting point for a new
 ### Features
 
 - A planner converts the problem statement into ordered tasks with acceptance criteria.
-- For each task, a coding agent generates complete files as a project structure; reviewer and testing agents inspect those generated files and return separate reports.
+- Before task agents start, a planner checkpoint can ask targeted clarification questions, incorporate the user's answers, and present a proposed task plan for approval.
+- For each task, coding, review, and test-planning agents work concurrently; a final synthesis agent integrates all results into the project structure.
 - A Streamlit UI displays the problem, task plan, generated source/configuration/tests, review feedback, and test plans. It supports individual-file and project ZIP downloads.
+- During generation, the UI shows a live agent tree with the active planner, coder, reviewer, or test planner highlighted, plus completed, waiting, or failed states for each task.
 - A CLI is available for running the workflow without the UI.
 - Ollama and its models remain on the host. Docker is used only for the Streamlit application.
 - Input, response, task-plan, and generated-file limits plus path validation provide deterministic safety boundaries.
@@ -35,7 +37,7 @@ Problem statement
  Streamlit artifact browser / CLI output
 ```
 
-The planner and coding agents run in sequence. For each task, the coding agent writes the files first; the reviewer and testing agents then analyze those files concurrently. Tasks are processed one at a time to limit load on local model hardware. ADK manages the model-agent invocations, and LiteLLM connects ADK to Ollama's OpenAI-compatible chat endpoint.
+The planner runs first. Then each task starts three independent agents concurrently: coder, reviewer, and test planner. A UI setting limits how many task groups run at once (1–4) for local hardware capacity. Each coder writes an isolated proposal; reviewers and test planners work from the task requirements because they start at the same time and do not wait for the coder. After every task agent completes, a synthesis agent receives all proposals and reports, resolves overlap, and writes the final integrated project under `project/`. ADK manages the model-agent invocations, and LiteLLM connects ADK to Ollama's OpenAI-compatible chat endpoint.
 
 ## Requirements
 
@@ -156,7 +158,7 @@ Docker mode launches the UI with `make up`. In direct Python mode, activate `.ve
 streamlit run app.py
 ```
 
-Enter a problem statement with the desired behavior, constraints, and target language. Choose the model and maximum task count in the sidebar, then select **Generate project**. Choose an artifact run and task to inspect the plan, implementation files, reviewer feedback, and test plan. The implementation view can display individual files and download one file or the whole generated project as a ZIP.
+Enter a problem statement with the desired behavior, constraints, and target language. Choose the model, maximum task count, and number of parallel task groups in the sidebar, then select **Generate project**. The planner may pause to ask up to five focused questions; answer them and choose **Update task plan**. There are at most two clarification rounds. The planner then shows a proposed plan for human approval before any task agents run. If details remain unspecified at the limit, it is instructed to proceed with conventional assumptions. During generation, the live agent tree highlights active agents and shows the final synthesis stage. Choose an artifact run and task to inspect the plan, independent task proposals, reviewer feedback, and test plan. The **Final project** tab shows the integrated output and can download one file or the whole project as a ZIP.
 
 ### Command Line
 
@@ -176,32 +178,40 @@ python main.py "Add CSV import and validation to the application" --output ./art
 
 ## Generated Artifacts
 
-Each run creates a unique directory under `artifacts/`:
+Each run creates a unique directory under `artifacts/`. The planner derives a concise project name from the original request and clarification answers; it is used as the directory prefix and UI label. A timestamp and short unique suffix keep repeated projects distinct:
 
 ```text
-artifacts/<run-id>/
+artifacts/todo-list-application-20261024T093514Z-3568c3a9/
 ├── task-plan.json
 ├── project/
 │   ├── README.md
 │   ├── pyproject.toml
 │   └── src/                 # Example; files depend on the request
 ├── task-001-<task-name>/
+│   ├── proposal/            # Isolated output from this task's coder
 │   ├── generated-files.json
-│   ├── implementation.md    # List of files generated for this task
+│   ├── implementation.md    # Proposal file list
 │   ├── review.md
 │   └── test-plan.md
 └── task-002-<task-name>/...
+├── project/                 # Final synthesis output, not individual proposals
+├── final-files.json
+└── synthesis.md
 ```
 
-The `project/` directory is the integrated generated project. Task folders contain the artifacts associated with each task. Later coding tasks receive earlier generated project files as context and may update them. Generated files remain isolated under the run directory; they are not applied to the agent repository and are not automatically executed.
+The `project/` directory is produced after all task-agent outputs are available. Every final project includes a `README.md` with its overview, requirements, setup, run, test, and project-structure instructions; if synthesis omits an adequate README, the workflow creates one using the user request, clarification answers, and generated manifests. The workflow performs syntax-only checks on generated Python, JSON, TOML, and YAML where supported and records findings in `static-checks.md`. It does not execute generated code, install generated dependencies, or run generated tests.
+
+Normally the synthesis agent integrates task proposals. If model synthesis and its single format-repair attempt both fail, the workflow creates a deterministic merge of validated task proposals instead and records a warning in `synthesis.md`; inspect file collisions and integration carefully because this fallback is not equivalent to model-based synthesis. Task folders contain independent proposals and their review/test-planning artifacts. Generated files remain isolated under the run directory; they are not applied to the agent repository and are not automatically executed.
+
+Older runs created before project naming was added may still appear with their original timestamp-only names.
 
 ## Development and Tests
 
-The tests validate task-plan parsing, prompt data boundaries, generated file manifest validation, path traversal protection, and artifact writing. They do not require Ollama or an API key:
+The tests validate planner clarification parsing and answer feedback, task-plan parsing and repair, prompt data boundaries, generated file manifest validation, path traversal protection, project README generation, static syntax checks, artifact writing, parallel execution ordering, synthesis fallback, and agent progress rendering. They do not require Ollama or an API key:
 
 ```bash
 python -m unittest discover -s tests -v
-python -m py_compile app.py main.py workflow.py scripts/check_ollama.py scripts/find_free_port.py
+python -m py_compile app.py main.py workflow.py progress_ui.py scripts/check_ollama.py scripts/find_free_port.py
 ```
 
 Validate Docker's resolved configuration:
@@ -242,18 +252,18 @@ The current version is a local-first prototype. The items below are known gaps a
 
 ### 6. Improve generation quality and artifact UX
 
-- **Current issue**: The planner and coder can return malformed or incomplete output, and the workflow rejects invalid JSON rather than repairing or retrying it. The UI is designed for local use and a small number of runs; it has no authentication, collaboration, or artifact retention controls.
-- **Future task**: Add bounded structured-output repair/retry, consistency checks between acceptance criteria and tests, generated-file diff views, run search/filtering, configurable retention, and authentication/authorization before any multi-user deployment.
+- **Current issue**: Planner, coder, and synthesis responses can still be malformed or incomplete. Each structured response gets one bounded format-repair attempt; if synthesis still fails, a deterministic proposal merge is used with a warning. The UI is designed for local use and a small number of runs; it has no authentication, collaboration, or artifact retention controls.
+- **Future task**: Improve bounded structured-output repair and quality checks, add consistency checks between acceptance criteria and tests, generated-file diff views, run search/filtering, configurable retention, and authentication/authorization before any multi-user deployment.
 
 These items are starting points for future issues or pull requests. A contribution should define a narrow scope, security boundary, acceptance criteria, and tests before implementation.
 
 ## Security, Privacy, and Limitations
 
 - With local Ollama, prompts and generated outputs are processed by the configured host model. A remote model provider receives prompts under that provider's terms. Do not submit secrets, personal data, or proprietary code unless that model host is approved to receive it.
-- The planner and coding agents have no tools. The app does not inspect an existing repository, execute commands, run generated code/tests, or apply generated files to this repository.
+- The planner, coding, reviewer, tester, and synthesis agents have no tools. The app does not inspect an existing repository, execute commands, run generated code/tests, or apply generated files to this repository.
 - Generated paths are restricted to relative paths beneath the isolated project directory. Traversal, absolute paths, `.git`/`.env` paths, duplicate/case-colliding paths, and oversized plans/files are rejected.
 - Prompt instructions and serialized JSON boundaries are defense-in-depth measures, not a guarantee against prompt injection. Model outputs can be unsafe, incorrect, incomplete, or misleading. Review generated code and agent reports before use.
-- The reviewer and test planner provide model-generated analysis, not execution-based verification. Generated test files are not run automatically.
+- The reviewer and test planner provide model-generated analysis, not execution-based verification. Generated test files are not run automatically. Static syntax checks catch some formatting errors but do not guarantee that a project installs, starts, or behaves correctly.
 - Agents do not receive an existing project checkout, so generated files may need adaptation to integrate with an existing application.
 - The Docker app requires Ollama to be reachable from the host network. Docker Desktop does not reuse a host-only loopback listener automatically.
 

@@ -8,6 +8,7 @@ from workflow import (
     encode_untrusted,
     parse_generated_files,
     parse_task_plan,
+    project_display_name,
     safe_slug,
     validate_agent_response,
     validate_problem,
@@ -114,6 +115,14 @@ class SafeSlugTests(unittest.TestCase):
 
     def test_has_fallback_for_empty_titles(self):
         self.assertEqual(safe_slug("!!!"), "task")
+
+
+class ProjectDisplayNameTests(unittest.TestCase):
+    def test_uses_model_name_and_removes_control_characters(self):
+        self.assertEqual(project_display_name("  Todo\nManager  ", "Build an app"), "Todo Manager")
+
+    def test_falls_back_to_problem_description(self):
+        self.assertEqual(project_display_name(None, "Build a task tracking dashboard. Extra details"), "Task Tracking Dashboard")
 
 
 if __name__ == "__main__":
