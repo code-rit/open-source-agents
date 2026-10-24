@@ -13,6 +13,7 @@ The intended users are developers who want a reviewable starting point for a new
 - A planner converts the problem statement into ordered tasks with acceptance criteria.
 - For each task, a coding agent generates complete files as a project structure; reviewer and testing agents inspect those generated files and return separate reports.
 - A Streamlit UI displays the problem, task plan, generated source/configuration/tests, review feedback, and test plans. It supports individual-file and project ZIP downloads.
+- During generation, the UI shows a live agent tree with the active planner, coder, reviewer, or test planner highlighted, plus completed, waiting, or failed states for each task.
 - A CLI is available for running the workflow without the UI.
 - Ollama and its models remain on the host. Docker is used only for the Streamlit application.
 - Input, response, task-plan, and generated-file limits plus path validation provide deterministic safety boundaries.
@@ -197,11 +198,11 @@ The `project/` directory is the integrated generated project. Task folders conta
 
 ## Development and Tests
 
-The tests validate task-plan parsing, prompt data boundaries, generated file manifest validation, path traversal protection, and artifact writing. They do not require Ollama or an API key:
+The tests validate task-plan parsing and repair, prompt data boundaries, generated file manifest validation, path traversal protection, artifact writing, and agent progress rendering. They do not require Ollama or an API key:
 
 ```bash
 python -m unittest discover -s tests -v
-python -m py_compile app.py main.py workflow.py scripts/check_ollama.py scripts/find_free_port.py
+python -m py_compile app.py main.py workflow.py progress_ui.py scripts/check_ollama.py scripts/find_free_port.py
 ```
 
 Validate Docker's resolved configuration:

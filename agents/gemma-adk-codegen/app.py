@@ -15,6 +15,7 @@ import streamlit as st
 from dotenv import load_dotenv
 
 from main import run_workflow
+from progress_ui import render_agent_tree_html
 from workflow import safe_slug, validate_problem
 
 load_dotenv()
@@ -22,7 +23,6 @@ load_dotenv()
 ROOT = Path(__file__).resolve().parent
 ARTIFACTS_DIR = ROOT / "artifacts"
 MAX_DISPLAY_CHARS = 200_000
-
 st.set_page_config(
     page_title="Gemma Code Studio",
     page_icon="🧩",
@@ -33,10 +33,26 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-    .block-container { padding-top: 4rem; padding-bottom: 3rem; }
+            .block-container { padding-top: 4rem; padding-bottom: 3rem; }
       [data-testid="stSidebar"] { border-right: 1px solid rgba(120, 130, 140, .22); }
       .studio-kicker { color: #168a72; font-size: .78rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
       .studio-note { color: #68737d; font-size: .92rem; }
+            .agent-tree { border: 1px solid rgba(130, 145, 155, .24); border-radius: 8px; padding: 14px 16px; background: rgba(25, 30, 34, .72); }
+            .agent-tree-heading { color: #8a969e; font-size: .72rem; font-weight: 700; letter-spacing: .08em; margin-bottom: 8px; }
+            .agent-tree-row { display: flex; align-items: center; gap: 9px; min-height: 34px; padding: 4px 8px; border-radius: 5px; color: #d8e0e3; font-size: .88rem; }
+            .agent-tree-row.level-1 { margin-left: 20px; border-left: 1px solid rgba(130,145,155,.25); }
+            .agent-tree-row.level-2 { margin-left: 43px; border-left: 1px solid rgba(130,145,155,.2); }
+            .agent-tree-row.current { color: #fff; }
+            .agent-tree-row.active { background: rgba(22, 138, 114, .2); outline: 1px solid rgba(22, 180, 145, .65); color: #fff; }
+            .agent-tree-row.muted { color: #879198; }
+            .agent-mark { width: 20px; text-align: center; color: #91a0a6; font-weight: 700; }
+            .active .agent-mark { color: #42d6b2; }
+            .agent-name { flex: 1; }
+            .agent-state { flex: 0 0 auto; font-size: .65rem; font-weight: 700; letter-spacing: .05em; color: #89949a; }
+            .state-running { color: #42d6b2; animation: agent-pulse 1.4s ease-in-out infinite; }
+            .state-completed { color: #77c89c; }
+            .state-failed { color: #ff7777; }
+            @keyframes agent-pulse { 50% { opacity: .48; } }
     </style>
     """,
     unsafe_allow_html=True,
@@ -135,10 +151,55 @@ if submitted:
             raise ValueError("Enter a model identifier in the sidebar.")
         os.environ["MODEL_NAME"] = model_name.strip()
         ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
-        with st.spinner("Planning tasks and generating project artifacts with Gemma..."):
-            generated_run = asyncio.run(
-                run_workflow(problem_statement, ARTIFACTS_DIR, max_tasks)
+        progress: dict[str, dict[str, Any]] = {}
+        workflow_tasks: list[dict[str, Any]] = []
+        active_placeholder = st.container()
+        active_placeholder.subheader("Agent execution")
+        tree_placeholder = active_placeholder.empty()
+        progress_state: dict[str, Any] = {"tasks": []}
+
+        def on_progress(event: dict[str, Any]) -> None:
+            agent_name = event["agent"]
+            if agent_name == "workflow" and event["status"] == "planned":
+                progress_state["tasks"] = json.loads(event.get("detail") or "[]")
+                progress["problem_planner"] = {"status": "completed"}
+            else:
+                key = (
+                    f"{event['task_id']}:{agent_name}"
+                    if event.get("task_id")
+                    else agent_name
+                )
+                progress[key] = event
+            current_task_id = next(
+                (
+                    item.get("task_id")
+                    for item in progress.values()
+                    if item.get("status") == "running" and item.get("task_id")
+                ),
+                None,
             )
+            tree_placeholder.markdown(
+                render_agent_tree_html(
+                    progress, progress_state["tasks"], current_task_id
+                ),
+                unsafe_allow_html=True,
+            )
+
+        initial_progress = {
+            "problem_planner": {"status": "running", "agent": "problem_planner"}
+        }
+        tree_placeholder.markdown(
+            render_agent_tree_html(initial_progress), unsafe_allow_html=True
+        )
+        st.caption("Planning and generating artifacts. Active agents are highlighted below.")
+        generated_run = asyncio.run(
+            run_workflow(
+                problem_statement,
+                ARTIFACTS_DIR,
+                max_tasks,
+                progress_callback=on_progress,
+            )
+        )
         st.session_state["selected_run"] = generated_run.name
         st.success(f"Generation complete: `{generated_run.name}`")
     except Exception as exc:
