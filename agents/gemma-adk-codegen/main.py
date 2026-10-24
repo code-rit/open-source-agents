@@ -23,6 +23,7 @@ from workflow import (
     encode_untrusted,
     parse_generated_files,
     parse_task_plan,
+    project_display_name,
     safe_slug,
     validate_agent_response,
     validate_problem,
@@ -41,7 +42,7 @@ whether the request contains enough information to generate a useful, coherent p
 If important requirements are missing, ask up to 5 concise, specific questions. Return
 only one JSON object in exactly one of these forms:
 {"status":"clarification_required","questions":[{"id":"q1","question":"...","options":["..."]}]}
-{"status":"ready","tasks":[{"title":"...","description":"...","acceptance_criteria":["..."]}]}
+{"status":"ready","project_name":"...","tasks":[{"title":"...","description":"...","acceptance_criteria":["..."]}]}
 Questions must be answerable by the user and focus on decisions that materially change
 the generated result (such as target platform, core features, persistence, or UI). Include
 2-4 short options when choices are natural; otherwise use an empty options list. Do not
@@ -221,7 +222,28 @@ async def generate_task_plan(
     return result["tasks"]
 
 
-def parse_planner_result(response: str, max_tasks: int) -> dict[str, Any]:
+async def generate_plan_checkpoint(
+    problem: str,
+    max_tasks: int,
+    clarification_history: list[dict[str, str]] | None = None,
+    progress_callback: ProgressCallback | None = None,
+    force_ready: bool = False,
+) -> dict[str, Any]:
+    """Return a ready plan with its project name or the planner's questions."""
+    return await request_plan(
+        problem,
+        max_tasks,
+        clarification_history=clarification_history,
+        progress_callback=progress_callback,
+        force_ready=force_ready,
+    )
+
+
+def parse_planner_result(
+    response: str,
+    max_tasks: int,
+    naming_context: str = "",
+) -> dict[str, Any]:
     """Validate the planner's ready-plan or clarification-question response."""
     candidate = response.strip()
     fenced = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", candidate, re.DOTALL | re.IGNORECASE)
@@ -262,7 +284,11 @@ def parse_planner_result(response: str, max_tasks: int) -> dict[str, Any]:
     if tasks_payload is None:
         raise ValueError("Ready planner response must contain tasks.")
     tasks = parse_task_plan(json.dumps({"tasks": tasks_payload}), max_tasks=max_tasks)
-    return {"status": "ready", "tasks": tasks}
+    return {
+        "status": "ready",
+        "project_name": project_display_name(payload.get("project_name"), naming_context),
+        "tasks": tasks,
+    }
 
 
 async def request_plan(
@@ -273,6 +299,9 @@ async def request_plan(
     force_ready: bool = False,
 ) -> dict[str, Any]:
     history = clarification_history or []
+    naming_context = problem + " " + " ".join(
+        f"{key}: {value}" for answer_set in history for key, value in answer_set.items()
+    )
     readiness_instruction = (
         "Do not ask more questions. Make conventional, explicit assumptions for any "
         "remaining unspecified details and return a ready task plan. "
@@ -287,7 +316,7 @@ async def request_plan(
     )
     response = await run_agent("problem_planner", PLANNER_INSTRUCTION, prompt, progress_callback)
     try:
-        return parse_planner_result(response, max_tasks=max_tasks)
+        return parse_planner_result(response, max_tasks=max_tasks, naming_context=naming_context)
     except (ValueError, json.JSONDecodeError) as first_error:
         repair_prompt = (
             "Repair the previous planner response into the exact two-branch JSON schema "
@@ -299,7 +328,7 @@ async def request_plan(
             "problem_planner_repair", PLANNER_INSTRUCTION, repair_prompt, progress_callback
         )
         try:
-            return parse_planner_result(repaired, max_tasks=max_tasks)
+            return parse_planner_result(repaired, max_tasks=max_tasks, naming_context=naming_context)
         except (ValueError, json.JSONDecodeError) as repair_error:
             raise ValueError(
                 "Planner response was invalid after one format-repair attempt. "
@@ -314,22 +343,28 @@ async def run_workflow(
     progress_callback: ProgressCallback | None = None,
     max_parallel_tasks: int = 2,
     planned_tasks: list[dict[str, Any]] | None = None,
+    project_name: str | None = None,
 ) -> Path:
     if not 1 <= max_parallel_tasks <= 4:
         raise ValueError("max_parallel_tasks must be between 1 and 4.")
     problem = validate_problem(problem)
     tasks = planned_tasks or await generate_task_plan(problem, max_tasks, progress_callback)
+    project_name = project_display_name(project_name, problem)
     report_progress(progress_callback, "workflow", "planned", detail=json.dumps(tasks))
     for task in tasks:
         for agent_name in ("coding_agent", "review_agent", "testing_agent"):
             report_progress(progress_callback, agent_name, "pending", task["id"], task["title"])
     report_progress(progress_callback, "synthesis_agent", "pending")
 
-    run_id = f"{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}-{uuid4().hex[:8]}"
+    run_id = f"{safe_slug(project_name)}-{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}-{uuid4().hex[:8]}"
     run_dir = output_dir / run_id
     run_dir.mkdir(parents=True, exist_ok=False)
     (run_dir / "task-plan.json").write_text(
-        json.dumps({"problem": problem, "tasks": tasks}, indent=2) + "\n",
+        json.dumps(
+            {"problem": problem, "project_name": project_name, "tasks": tasks},
+            indent=2,
+        )
+        + "\n",
         encoding="utf-8",
     )
     project_dir = run_dir / "project"

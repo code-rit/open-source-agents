@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 from main import (
     MAX_CLARIFICATION_ROUNDS,
     ClarificationRequired,
-    request_plan,
+    generate_plan_checkpoint,
     run_workflow,
 )
 from progress_ui import render_agent_tree_html
@@ -84,6 +84,18 @@ def load_run(run_path: Path) -> tuple[dict[str, Any], Path]:
     if not isinstance(payload, dict) or not isinstance(payload.get("tasks"), list):
         raise ValueError("Run task plan has an unsupported format.")
     return payload, resolved
+
+
+def run_display_name(run_path: Path) -> str:
+    """Use project metadata for a friendly selector label, with legacy fallback."""
+    try:
+        payload, _ = load_run(run_path)
+        display_name = payload.get("project_name")
+        if isinstance(display_name, str) and display_name.strip():
+            return display_name.strip()
+    except (OSError, ValueError, json.JSONDecodeError):
+        pass
+    return run_path.name
 
 
 def task_files(task_dir: Path) -> list[str]:
@@ -174,6 +186,7 @@ if submitted:
         st.session_state["clarification_history"] = []
         st.session_state.pop("planner_questions", None)
         st.session_state.pop("approved_tasks", None)
+        st.session_state.pop("approved_project_name", None)
         st.session_state["checkpoint_planning"] = True
     except Exception as exc:
         st.error(f"Generation failed: {exc}")
@@ -184,7 +197,7 @@ if st.session_state.get("checkpoint_planning"):
     planner_progress.info("Planner is checking whether the request is specific enough...")
     try:
         planner_result = asyncio.run(
-            request_plan(
+            generate_plan_checkpoint(
                 st.session_state["draft_problem"],
                 max_tasks,
                 st.session_state.get("clarification_history", []),
@@ -196,7 +209,7 @@ if st.session_state.get("checkpoint_planning"):
             if rounds_used >= MAX_CLARIFICATION_ROUNDS:
                 st.warning("The planner reached its clarification limit. It will proceed using explicit assumptions.")
                 planner_result = asyncio.run(
-                    request_plan(
+                    generate_plan_checkpoint(
                         st.session_state["draft_problem"]
                         + "\nUse conventional defaults for unspecified details; do not ask further questions.",
                         max_tasks,
@@ -210,6 +223,7 @@ if st.session_state.get("checkpoint_planning"):
                 st.rerun()
         if planner_result["status"] == "ready":
             st.session_state["approved_tasks"] = planner_result["tasks"]
+            st.session_state["approved_project_name"] = planner_result["project_name"]
             st.session_state["clarification_rounds"] = 0
     except Exception as exc:
         st.session_state.pop("checkpoint_planning", None)
@@ -296,10 +310,12 @@ if st.session_state.get("approved_tasks"):
                     progress_callback=on_progress,
                     max_parallel_tasks=max_parallel_tasks,
                     planned_tasks=approved_tasks,
+                    project_name=st.session_state.get("approved_project_name"),
                 )
             )
             st.session_state["selected_run"] = generated_run.name
             st.session_state.pop("approved_tasks", None)
+            st.session_state.pop("approved_project_name", None)
             st.session_state.pop("clarification_history", None)
             st.success(f"Generation complete: `{generated_run.name}`")
         except Exception as exc:
@@ -315,6 +331,7 @@ if not runs:
     st.stop()
 
 run_names = [path.name for path in runs]
+run_labels = {path.name: run_display_name(path) for path in runs}
 default_run = st.session_state.get("selected_run", run_names[0])
 if default_run not in run_names:
     default_run = run_names[0]
@@ -322,7 +339,7 @@ selected_name = st.selectbox(
     "Artifact run",
     options=run_names,
     index=run_names.index(default_run),
-    format_func=lambda value: value,
+    format_func=lambda value: f"{run_labels[value]} · {value.rsplit('-', 1)[-1]}",
 )
 
 try:
@@ -332,6 +349,7 @@ except (OSError, ValueError, json.JSONDecodeError) as exc:
     st.stop()
 
 tasks = plan["tasks"]
+st.subheader(plan.get("project_name", run_dir.name))
 project_dir = run_dir / "project"
 overview, files_column, task_count = st.columns([2, 2, 1])
 overview.metric("Model", model_name or "Configured in environment")

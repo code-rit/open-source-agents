@@ -78,9 +78,13 @@ class ParallelWorkflowTests(unittest.IsolatedAsyncioTestCase):
                     max_tasks=2,
                     progress_callback=progress_callback,
                     max_parallel_tasks=2,
+                    project_name="Sample Application",
                 )
 
             self.assertGreaterEqual(maximum_active, 3)
+            self.assertTrue(run_dir.name.startswith("sample-application-"))
+            plan = json.loads((run_dir / "task-plan.json").read_text())
+            self.assertEqual(plan["project_name"], "Sample Application")
             self.assertEqual((run_dir / "project" / "app.py").read_text(), "value = 1\n")
             self.assertTrue((run_dir / "task-001-create-entry-point" / "review.md").is_file())
             self.assertEqual((run_dir / "final-files.json").read_text().strip(), '[\n  "app.py"\n]')

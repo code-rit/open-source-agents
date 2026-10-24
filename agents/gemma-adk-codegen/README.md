@@ -178,10 +178,10 @@ python main.py "Add CSV import and validation to the application" --output ./art
 
 ## Generated Artifacts
 
-Each run creates a unique directory under `artifacts/`:
+Each run creates a unique directory under `artifacts/`. The planner derives a concise project name from the original request and clarification answers; it is used as the directory prefix and UI label. A timestamp and short unique suffix keep repeated projects distinct:
 
 ```text
-artifacts/<run-id>/
+artifacts/todo-list-application-20261024T093514Z-3568c3a9/
 ├── task-plan.json
 ├── project/
 │   ├── README.md
@@ -200,6 +200,8 @@ artifacts/<run-id>/
 ```
 
 The `project/` directory is produced only after the synthesis agent has reviewed all task-agent outputs. Task folders contain independent proposals and their review/test-planning artifacts. Generated files remain isolated under the run directory; they are not applied to the agent repository and are not automatically executed.
+
+Older runs created before project naming was added may still appear with their original timestamp-only names.
 
 ## Development and Tests
 

@@ -46,6 +46,7 @@ class PlannerCheckpointTests(unittest.IsolatedAsyncioTestCase):
         ready = json.dumps(
             {
                 "status": "ready",
+                "project_name": "Number Toolkit",
                 "tasks": [
                     {
                         "title": "Build Python app",
@@ -65,6 +66,7 @@ class PlannerCheckpointTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(first["status"], "clarification_required")
         self.assertEqual(second["status"], "ready")
+        self.assertEqual(second["project_name"], "Number Toolkit")
         second_prompt = mocked.await_args_list[1].args[2]
         self.assertIn('"Python"', second_prompt)
 
@@ -96,6 +98,27 @@ class PlannerCheckpointTests(unittest.IsolatedAsyncioTestCase):
         with patch("main.run_agent", new=AsyncMock(return_value=ready)) as mocked:
             await request_plan("Build an app", 3, force_ready=True)
         self.assertIn("Do not ask more questions", mocked.await_args.args[2])
+
+    async def test_missing_project_name_uses_description_and_clarification_answers(self):
+        ready = json.dumps(
+            {
+                "status": "ready",
+                "tasks": [
+                    {
+                        "title": "Create app",
+                        "description": "Create the application.",
+                        "acceptance_criteria": ["App starts."],
+                    }
+                ],
+            }
+        )
+        with patch("main.run_agent", new=AsyncMock(return_value=ready)):
+            result = await request_plan(
+                "Build a todo list application",
+                3,
+                [{"persistence": "SQLite", "features": "due dates and priorities"}],
+            )
+        self.assertIn("Todo List", result["project_name"])
 
 
 if __name__ == "__main__":

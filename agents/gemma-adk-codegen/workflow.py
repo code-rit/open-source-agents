@@ -198,3 +198,19 @@ def safe_slug(value: str) -> str:
     """Convert a task title to a filesystem-safe, readable slug."""
     slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
     return slug[:60].strip("-") or "task"
+
+
+def project_display_name(proposed_name: str | None, problem: str) -> str:
+    """Return a concise display name, falling back to the user's problem statement."""
+    candidate = proposed_name.strip() if isinstance(proposed_name, str) else ""
+    if candidate:
+        candidate = re.sub(r"[\x00-\x1f\x7f]", " ", candidate)
+        candidate = re.sub(r"\s+", " ", candidate).strip(" .-_")
+        if candidate:
+            return candidate[:80]
+
+    fallback = re.split(r"[.!?\n]", problem, maxsplit=1)[0].strip()
+    fallback = re.sub(r"^(please\s+)?(build|create|make|develop|implement)\s+", "", fallback, flags=re.I)
+    fallback = re.sub(r"^(me\s+)?(a|an|the)\s+", "", fallback, flags=re.I)
+    fallback = re.sub(r"\s+", " ", fallback).strip(" .-_ ")
+    return (fallback[:80] or "Generated Project").title()
