@@ -393,9 +393,16 @@ with final_tab:
     if "proposal_merge_fallback" in synthesis_report:
         st.warning(
             "The synthesis agent could not produce a valid integrated manifest. "
-            "This project is a deterministic merge of validated task proposals; "
-            "review file collisions and integration carefully."
+            "This project contains a deterministic merge of validated task proposals. "
+            "Conflicting versions are preserved under project/task-proposals/ for review."
         )
+        conflict_lines = [
+            line for line in synthesis_report.splitlines()
+            if line.startswith("- `") and " saved to `" in line
+        ]
+        if conflict_lines:
+            with st.expander(f"Review {len(conflict_lines)} preserved file conflict(s)"):
+                st.code("\n".join(conflict_lines), language="text")
     else:
         st.caption("Synthesized after all task agents complete.")
     files = project_files(project_dir)
