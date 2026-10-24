@@ -511,7 +511,7 @@ async def run_workflow(
             "completed_with_warning",
             detail=synthesis_warning,
         )
-        final_files = merge_task_proposals(task_results)
+        final_files, proposal_conflicts = merge_task_proposals(task_results)
         synthesis_method = "proposal_merge_fallback"
         report_progress(
             progress_callback,
@@ -519,6 +519,8 @@ async def run_workflow(
             "fallback_completed",
             detail=synthesis_warning,
         )
+    else:
+        proposal_conflicts = []
 
     final_files = ensure_project_readme(
         final_files,
@@ -535,6 +537,17 @@ async def run_workflow(
     synthesis_report = (
         "Final project assembly method: " + synthesis_method + ".\n"
         + (f"Synthesis warning: {synthesis_warning}\n" if synthesis_warning else "")
+        + (
+            "Conflicting task files were preserved as alternatives:\n"
+            + "\n".join(
+                f"- `{conflict['path']}` from {conflict['task_id']} saved to "
+                f"`{conflict['alternative_path']}`"
+                for conflict in proposal_conflicts
+            )
+            + "\n"
+            if proposal_conflicts
+            else ""
+        )
         + "\n"
         + "\n".join(f"- `{path}`" for path in final_paths)
         + "\n"
@@ -553,23 +566,35 @@ async def run_workflow(
     return run_dir
 
 
-def merge_task_proposals(task_results: list[dict[str, Any]]) -> list[dict[str, str]]:
-    """Merge validated task files deterministically when model synthesis fails."""
+def merge_task_proposals(
+    task_results: list[dict[str, Any]],
+) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+    """Merge validated proposals and preserve file conflicts as task alternatives."""
     merged: dict[str, dict[str, str]] = {}
+    conflicts: list[dict[str, str]] = []
     for result in task_results:
         task = result["task"]
         for file_entry in result["implementation_files"]:
             path = file_entry["path"]
             previous = merged.get(path)
             if previous and previous["content"] != file_entry["content"]:
-                raise ValueError(
-                    f"Cannot safely merge conflicting task proposals for '{path}'. "
-                    "Review the task proposals and rerun synthesis."
+                alternative_path = f"task-proposals/{safe_slug(task['id'])}/{path}"
+                conflicts.append(
+                    {
+                        "path": path,
+                        "task_id": task["id"],
+                        "alternative_path": alternative_path,
+                    }
                 )
-            merged[path] = file_entry
+                merged[alternative_path] = {
+                    "path": alternative_path,
+                    "content": file_entry["content"],
+                }
+                continue
+            merged.setdefault(path, file_entry)
     if not merged:
         raise ValueError("No validated task proposals are available for fallback assembly.")
-    return list(merged.values())
+    return list(merged.values()), conflicts
 
 
 def infer_project_commands(file_paths: list[str]) -> tuple[str, str, str]:

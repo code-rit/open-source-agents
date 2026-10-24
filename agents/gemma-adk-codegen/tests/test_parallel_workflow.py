@@ -207,6 +207,32 @@ class GeneratedProjectValidationTests(unittest.TestCase):
         self.assertEqual(len(findings), 1)
         self.assertIn("src/bad.py", findings[0])
 
+    def test_proposal_merge_preserves_conflicting_files(self):
+        results = [
+            {
+                "task": {"id": "task-001", "title": "One"},
+                "implementation_files": [
+                    {"path": "inventory_management.py", "content": "version = 1\n"}
+                ],
+            },
+            {
+                "task": {"id": "task-002", "title": "Two"},
+                "implementation_files": [
+                    {"path": "inventory_management.py", "content": "version = 2\n"}
+                ],
+            },
+        ]
+
+        files, conflicts = main.merge_task_proposals(results)
+        contents = {item["path"]: item["content"] for item in files}
+
+        self.assertEqual(contents["inventory_management.py"], "version = 1\n")
+        self.assertEqual(
+            contents["task-proposals/task-002/inventory_management.py"],
+            "version = 2\n",
+        )
+        self.assertEqual(conflicts[0]["task_id"], "task-002")
+
 
 if __name__ == "__main__":
     unittest.main()
