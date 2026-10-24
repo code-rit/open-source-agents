@@ -311,6 +311,7 @@ if st.session_state.get("approved_tasks"):
                     max_parallel_tasks=max_parallel_tasks,
                     planned_tasks=approved_tasks,
                     project_name=st.session_state.get("approved_project_name"),
+                    clarification_history=st.session_state.get("clarification_history", []),
                 )
             )
             st.session_state["selected_run"] = generated_run.name

@@ -87,7 +87,10 @@ class ParallelWorkflowTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(plan["project_name"], "Sample Application")
             self.assertEqual((run_dir / "project" / "app.py").read_text(), "value = 1\n")
             self.assertTrue((run_dir / "task-001-create-entry-point" / "review.md").is_file())
-            self.assertEqual((run_dir / "final-files.json").read_text().strip(), '[\n  "app.py"\n]')
+            self.assertEqual(
+                json.loads((run_dir / "final-files.json").read_text()),
+                ["app.py", "README.md"],
+            )
 
         self.assertEqual(sum(name == "synthesis_agent" for name, _ in calls), 1)
         self.assertEqual(sum(name == "synthesis_repair_agent" for name, _ in calls), 1)
@@ -162,11 +165,47 @@ class ParallelWorkflowTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("proposal_merge_fallback", report)
             self.assertIn("Gemma returned no synthesis response", report)
             self.assertEqual((run_dir / "final-files.json").exists(), True)
+            readme = (run_dir / "project/README.md").read_text()
+            self.assertIn("## Setup", readme)
+            self.assertIn("## Run", readme)
+            self.assertIn("## Tests", readme)
+            static_report = (run_dir / "static-checks.md").read_text()
+            self.assertIn("Static syntax checks only", static_report)
 
         self.assertTrue(
             any(event["agent"] == "synthesis_agent" and event["status"] == "fallback_completed"
                 for event in progress_events)
         )
+
+
+class GeneratedProjectValidationTests(unittest.TestCase):
+    def test_ensures_readme_contains_runnable_setup_sections(self):
+        files = [
+            {"path": "requirements.txt", "content": "pytest\n"},
+            {"path": "main.py", "content": "print('hi')\n"},
+        ]
+        completed = main.ensure_project_readme(
+            files,
+            "Sample Project",
+            "Create a small Python program",
+            [{"language": "Python"}],
+        )
+        readme = next(file_entry["content"] for file_entry in completed if file_entry["path"] == "README.md")
+        self.assertIn("python -m pip install -r requirements.txt", readme)
+        self.assertIn("python main.py", readme)
+        self.assertIn("python -m pytest", readme)
+        self.assertIn("language: Python", readme)
+
+    def test_static_checks_report_syntax_without_execution(self):
+        findings = main.static_check_generated_files(
+            [
+                {"path": "src/good.py", "content": "value = 1\n"},
+                {"path": "src/bad.py", "content": "def broken(:\n pass\n"},
+                {"path": "config.json", "content": "{\"ok\": true}"},
+            ]
+        )
+        self.assertEqual(len(findings), 1)
+        self.assertIn("src/bad.py", findings[0])
 
 
 if __name__ == "__main__":

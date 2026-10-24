@@ -199,13 +199,15 @@ artifacts/todo-list-application-20261024T093514Z-3568c3a9/
 └── synthesis.md
 ```
 
-The `project/` directory is produced after all task-agent outputs are available. Normally the synthesis agent integrates them. If model synthesis and its single format-repair attempt both fail, the workflow creates a deterministic merge of the validated task proposals instead and records a warning in `synthesis.md`; inspect file collisions and integration carefully because this fallback is not equivalent to model-based synthesis. Task folders contain independent proposals and their review/test-planning artifacts. Generated files remain isolated under the run directory; they are not applied to the agent repository and are not automatically executed.
+The `project/` directory is produced after all task-agent outputs are available. Every final project includes a `README.md` with its overview, requirements, setup, run, test, and project-structure instructions; if synthesis omits an adequate README, the workflow creates one using the user request, clarification answers, and generated manifests. The workflow performs syntax-only checks on generated Python, JSON, TOML, and YAML where supported and records findings in `static-checks.md`. It does not execute generated code, install generated dependencies, or run generated tests.
+
+Normally the synthesis agent integrates task proposals. If model synthesis and its single format-repair attempt both fail, the workflow creates a deterministic merge of validated task proposals instead and records a warning in `synthesis.md`; inspect file collisions and integration carefully because this fallback is not equivalent to model-based synthesis. Task folders contain independent proposals and their review/test-planning artifacts. Generated files remain isolated under the run directory; they are not applied to the agent repository and are not automatically executed.
 
 Older runs created before project naming was added may still appear with their original timestamp-only names.
 
 ## Development and Tests
 
-The tests validate planner clarification parsing and answer feedback, task-plan parsing and repair, prompt data boundaries, generated file manifest validation, path traversal protection, artifact writing, parallel execution ordering, synthesis, and agent progress rendering. They do not require Ollama or an API key:
+The tests validate planner clarification parsing and answer feedback, task-plan parsing and repair, prompt data boundaries, generated file manifest validation, path traversal protection, project README generation, static syntax checks, artifact writing, parallel execution ordering, synthesis fallback, and agent progress rendering. They do not require Ollama or an API key:
 
 ```bash
 python -m unittest discover -s tests -v
@@ -261,7 +263,7 @@ These items are starting points for future issues or pull requests. A contributi
 - The planner, coding, reviewer, tester, and synthesis agents have no tools. The app does not inspect an existing repository, execute commands, run generated code/tests, or apply generated files to this repository.
 - Generated paths are restricted to relative paths beneath the isolated project directory. Traversal, absolute paths, `.git`/`.env` paths, duplicate/case-colliding paths, and oversized plans/files are rejected.
 - Prompt instructions and serialized JSON boundaries are defense-in-depth measures, not a guarantee against prompt injection. Model outputs can be unsafe, incorrect, incomplete, or misleading. Review generated code and agent reports before use.
-- The reviewer and test planner provide model-generated analysis, not execution-based verification. Generated test files are not run automatically.
+- The reviewer and test planner provide model-generated analysis, not execution-based verification. Generated test files are not run automatically. Static syntax checks catch some formatting errors but do not guarantee that a project installs, starts, or behaves correctly.
 - Agents do not receive an existing project checkout, so generated files may need adaptation to integrate with an existing application.
 - The Docker app requires Ollama to be reachable from the host network. Docker Desktop does not reuse a host-only loopback listener automatically.
 
